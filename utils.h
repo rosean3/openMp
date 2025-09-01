@@ -15,4 +15,14 @@ void visualize_path(int N_POINTS, double points[][3], int *best_path);
 
 int read_points(const char *filename, double points[][3], int max_points);
 
+
+typedef struct {
+    double best_length;
+    int *best_path;
+} ACOResult;
+
+ACOResult parallel_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER);
+
+ACOResult sequential_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER);
+
 #endif

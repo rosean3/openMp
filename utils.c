@@ -1,6 +1,8 @@
 #include "utils.h"
 #include <math.h>
 #include <time.h>
+#include "config.h"
+#include <omp.h>
 
 double distance(int i, int j, double points[][3]) {
   double dx = points[i][0] - points[j][0];
@@ -105,4 +107,176 @@ int read_points(const char *filename, double points[][3], int max_points) {
 
   fclose(fp);
   return count;
+}
+
+ACOResult parallel_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER) {
+  printf("Parallel ACO\n");
+  
+  double best_length = 1e9;
+  int best_path[N_POINTS];
+  
+  double pheromone[N_POINTS][N_POINTS];
+    for (int i = 0; i < N_POINTS; i++)
+      for (int j = 0; j < N_POINTS; j++)
+        pheromone[i][j] = 1.0;
+
+    for (int iter = 0; iter < N_ITER; iter++) {
+      // temporary pheromone matrix for this iteration
+      double delta_pheromone[N_POINTS][N_POINTS];
+      for (int i = 0; i < N_POINTS; i++)
+        for (int j = 0; j < N_POINTS; j++)
+          delta_pheromone[i][j] = 0.0;
+      
+
+  #pragma omp parallel for schedule(dynamic)
+      for (int ant = 0; ant < N_ANTS; ant++) {
+        int visited[N_POINTS];
+        for (int v = 0; v < N_POINTS; v++)
+          visited[v] = 0;
+        int path[N_POINTS];
+        int current = 0;
+        path[0] = current;
+        visited[current] = 1;
+        double length = 0.0;
+
+        // Build path
+        for (int step = 1; step < N_POINTS; step++) {
+          int unvisited[N_POINTS];
+          int n_unvisited = 0;
+          for (int k = 0; k < N_POINTS; k++) {
+            if (!visited[k]) {
+              unvisited[n_unvisited++] = k;
+            }
+          }
+
+          double prob[n_unvisited];
+          double sum = 0.0;
+          for (int k = 0; k < n_unvisited; k++) {
+            int next = unvisited[k];
+            double tau = pow(pheromone[current][next], ALPHA);
+            double eta = pow(1.0 / distance(current, next, points), BETA);
+            prob[k] = tau * eta;
+            sum += prob[k];
+          }
+          for (int k = 0; k < n_unvisited; k++)
+            prob[k] /= sum;
+
+          int idx = roulette_wheel(n_unvisited, prob);
+          int next_point = unvisited[idx];
+
+          length += distance(current, next_point, points);
+          current = next_point;
+          path[step] = current;
+          visited[current] = 1;
+        }
+
+  // update best path (critical section)
+  #pragma omp critical
+        {
+          if (length < best_length) {
+            best_length = length;
+            for (int i = 0; i < N_POINTS; i++)
+              best_path[i] = path[i];
+          }
+        }
+
+  // update local pheromone
+  #pragma omp critical
+        {
+          for (int i = 0; i < N_POINTS - 1; i++) {
+            delta_pheromone[path[i]][path[i + 1]] += Q / length;
+          }
+          delta_pheromone[path[N_POINTS - 1]][path[0]] += Q / length;
+        }
+      }
+
+      // evaporate + deposit pheromone
+      for (int i = 0; i < N_POINTS; i++) {
+        for (int j = 0; j < N_POINTS; j++) {
+          pheromone[i][j] *= EVAPORATION_RATE;
+          pheromone[i][j] += delta_pheromone[i][j];
+        }
+      }
+    }
+
+  ACOResult result = {best_length, best_path};
+  return result;
+}
+
+ACOResult sequential_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER) {
+  printf("Sequential ACO\n");
+  
+  double pheromone[N_POINTS][N_POINTS];
+  for (int i = 0; i < N_POINTS; i++)
+    for (int j = 0; j < N_POINTS; j++)
+      pheromone[i][j] = 1.0;
+
+  double best_length = 1e9;
+  int best_path[N_POINTS];
+
+  for (int iter = 0; iter < N_ITER; iter++) {
+    for (int ant = 0; ant < N_ANTS; ant++) {
+      int visited[N_POINTS];
+      for (int v = 0; v < N_POINTS; v++)
+        visited[v] = 0;
+
+      int path[N_POINTS];
+      int current = 0;
+      path[0] = current;
+      visited[current] = 1;
+      double length = 0.0;
+
+      for (int step = 1; step < N_POINTS; step++) {
+        int unvisited[N_POINTS];
+        int n_unvisited = 0;
+        for (int k = 0; k < N_POINTS; k++) {
+          if (!visited[k]) {
+            unvisited[n_unvisited++] = k;
+          }
+        }
+
+        double prob[n_unvisited];
+        double sum = 0.0;
+        for (int k = 0; k < n_unvisited; k++) {
+          int next = unvisited[k];
+          double tau = pow(pheromone[current][next], ALPHA);
+          double eta = pow(1.0 / distance(current, next, points), BETA);
+          prob[k] = tau * eta;
+          sum += prob[k];
+        }
+
+        for (int k = 0; k < n_unvisited; k++)
+          prob[k] /= sum;
+
+        int idx = roulette_wheel(n_unvisited, prob);
+        int next_point = unvisited[idx];
+
+        length += distance(current, next_point, points);
+        current = next_point;
+        path[step] = current;
+        visited[current] = 1;
+      }
+
+      // Update best path
+      if (length < best_length) {
+        best_length = length;
+        for (int i = 0; i < N_POINTS; i++)
+          best_path[i] = path[i];
+      }
+
+      // Pheromone update
+      for (int i = 0; i < N_POINTS - 1; i++) {
+        pheromone[path[i]][path[i + 1]] += Q / length;
+      }
+      pheromone[path[N_POINTS - 1]][path[0]] += Q / length;
+    }
+
+    // Evaporation
+    for (int i = 0; i < N_POINTS; i++)
+      for (int j = 0; j < N_POINTS; j++)
+        pheromone[i][j] *= EVAPORATION_RATE;
+  }
+
+  ACOResult result = {best_length, best_path};
+  return result;
 }
