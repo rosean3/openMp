@@ -1,4 +1,4 @@
-Projects
+# Projects
 - Dot Product
 - Travelling Sales Person (TSP) problem solved with Ant Colony Optimization (ACO)
 
@@ -63,11 +63,11 @@ This project implements the Travelling Sales Person problem using Ant Colony Opt
 
 ### 📋 Requirements
 
--GCC with OpenMP support
+- GCC with OpenMP support
 
--gnuplot for visualization (optional)
+- gnuplot for visualization (optional)
 
--A system with multiple CPU cores for parallel execution
+- A system with multiple CPU cores for parallel execution
 
 ### ⚙️ Compilation
 ```bash
@@ -81,13 +81,13 @@ gcc aco.c utils.c -o aco -lm -fopenmp
 
 You will be prompted to provide:
 
--Number of points (cities).
+- Number of points (cities).
 
--Number of iterations for the ACO algorithm.
+- Number of iterations for the ACO algorithm.
 
--Whether to visualize the result (0 = no, 1 = yes).
+- Whether to visualize the result (0 = no, 1 = yes).
 
--Execution mode: parallel or sequential (p/s).
+- Execution mode: parallel or sequential (p/s).
 
 ### 📊 Example Results
 #### Parallel execution
