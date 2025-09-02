@@ -46,6 +46,8 @@ int main() {
     result = sequential_ant_colony_optimization(points, num_points, n_iterations);
   } else if (parallel_or_sequential == '2') {
     result = parallel2_ant_colony_optimization(points, num_points, n_iterations);
+  } else if (parallel_or_sequential == 'm') {
+    result = manual_batch(points, num_points, n_iterations);
   }
 
   clock_t end_time = clock();

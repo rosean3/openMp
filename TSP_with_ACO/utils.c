@@ -3,6 +3,7 @@
 #include <time.h>
 #include "config.h"
 #include <omp.h>
+#include <string.h>
 
 double distance(int i, int j, double points[][3]) {
   double dx = points[i][0] - points[j][0];
@@ -281,6 +282,11 @@ ACOResult sequential_ant_colony_optimization(double points[][3], int N_POINTS, i
   return result;
 }
 
+typedef struct {
+  double length;
+  char pad[CACHELINE - sizeof(double)];
+} AlignedDouble;
+
 ACOResult parallel2_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER) {
   printf("Parallel2 ACO\n");
   
@@ -397,6 +403,132 @@ ACOResult parallel2_ant_colony_optimization(double points[][3], int N_POINTS, in
         global_best_length = local_best_length[t];
         for (int i = 0; i < N_POINTS; i++)
           global_best_path[i] = local_best_path[t][i];
+      }
+    }
+  }
+
+  ACOResult result = {global_best_length, global_best_path};
+  return result;
+}
+
+ACOResult manual_batch(double points[][3], int N_POINTS, int N_ITER) {
+  printf("Manual batch ACO\n");
+
+  double pheromone[N_POINTS][N_POINTS];
+  for (int i = 0; i < N_POINTS; i++)
+    for (int j = 0; j < N_POINTS; j++)
+      pheromone[i][j] = 1.0;
+
+  double global_best_length = 1e9;
+  int* global_best_path = malloc(sizeof(int) * N_POINTS);
+
+  for (int iter = 0; iter < N_ITER; iter++) {
+    int n_threads;
+#pragma omp parallel
+    {
+      n_threads = omp_get_num_threads();
+    }
+
+    double delta_pheromone_private[n_threads][N_POINTS][N_POINTS];
+    for (int t = 0; t < n_threads; t++)
+      for (int i = 0; i < N_POINTS; i++)
+        for (int j = 0; j < N_POINTS; j++)
+          delta_pheromone_private[t][i][j] = 0.0;
+
+    AlignedDouble local_best_length[n_threads];
+    int local_best_path[n_threads][N_POINTS];
+    for (int t = 0; t < n_threads; t++)
+      local_best_length[t].length = 1e9;
+
+    // Manual ant batching
+#pragma omp parallel
+    {
+      int tid = omp_get_thread_num();
+      int ants_per_thread = (N_ANTS + n_threads - 1) / n_threads;  // ceiling
+      int start_ant = tid * ants_per_thread;
+      int end_ant = (start_ant + ants_per_thread > N_ANTS) ? N_ANTS : start_ant + ants_per_thread;
+
+      unsigned int seed = (unsigned int)time(NULL) ^ (tid * 2654435761U);
+
+      for (int ant = start_ant; ant < end_ant; ant++) {
+        int visited[N_POINTS];
+        memset(visited, 0, sizeof(visited));
+
+        int path[N_POINTS];
+        int current = 0;
+        path[0] = current;
+        visited[current] = 1;
+        double length = 0.0;
+
+        for (int step = 1; step < N_POINTS; step++) {
+          int unvisited[N_POINTS];
+          int n_unvisited = 0;
+          for (int k = 0; k < N_POINTS; k++) {
+            if (!visited[k]) {
+              unvisited[n_unvisited++] = k;
+            }
+          }
+
+          double prob[n_unvisited];
+          double sum = 0.0;
+          for (int k = 0; k < n_unvisited; k++) {
+            int next = unvisited[k];
+            double tau = pow(pheromone[current][next], ALPHA);
+            double eta = pow(1.0 / distance(current, next, points), BETA);
+            prob[k] = tau * eta;
+            sum += prob[k];
+          }
+
+          for (int k = 0; k < n_unvisited; k++)
+            prob[k] /= sum;
+
+          int idx = roulette_wheel(n_unvisited, prob);
+          int next_point = unvisited[idx];
+
+          length += distance(current, next_point, points);
+          current = next_point;
+          path[step] = current;
+          visited[current] = 1;
+        }
+
+        // Update local best
+        if (length < local_best_length[tid].length) {
+          local_best_length[tid].length = length;
+          memcpy(local_best_path[tid], path, sizeof(int) * N_POINTS);
+        }
+
+        // Update thread-local pheromone
+        for (int i = 0; i < N_POINTS - 1; i++) {
+          delta_pheromone_private[tid][path[i]][path[i + 1]] += Q / length;
+        }
+        delta_pheromone_private[tid][path[N_POINTS - 1]][path[0]] += Q / length;
+      }
+    } // end parallel
+
+    // Merge pheromone updates
+    double delta_pheromone[N_POINTS][N_POINTS];
+    for (int i = 0; i < N_POINTS; i++)
+      for (int j = 0; j < N_POINTS; j++)
+        delta_pheromone[i][j] = 0.0;
+
+    for (int t = 0; t < n_threads; t++)
+      for (int i = 0; i < N_POINTS; i++)
+        for (int j = 0; j < N_POINTS; j++)
+          delta_pheromone[i][j] += delta_pheromone_private[t][i][j];
+
+    // Apply pheromone evaporation and deposit
+    for (int i = 0; i < N_POINTS; i++) {
+      for (int j = 0; j < N_POINTS; j++) {
+        pheromone[i][j] *= EVAPORATION_RATE;
+        pheromone[i][j] += delta_pheromone[i][j];
+      }
+    }
+
+    // Merge local bests into global best
+    for (int t = 0; t < n_threads; t++) {
+      if (local_best_length[t].length < global_best_length) {
+        global_best_length = local_best_length[t].length;
+        memcpy(global_best_path, local_best_path[t], sizeof(int) * N_POINTS);
       }
     }
   }

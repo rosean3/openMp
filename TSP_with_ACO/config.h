@@ -9,5 +9,6 @@
 
 // Algorithm settings
 #define N_ANTS 57
+#define CACHELINE 64
 
 #endif
