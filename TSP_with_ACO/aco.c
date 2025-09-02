@@ -36,7 +36,7 @@ int main() {
   int n_points = read_points("points.txt", points, num_points);
 
   // Start timing
-  clock_t start_time = clock();
+  double start_time = omp_get_wtime();
 
   ACOResult result;
   
@@ -44,14 +44,9 @@ int main() {
     result = parallel_ant_colony_optimization(points, num_points, n_iterations);
   } else if (parallel_or_sequential == 's') {
     result = sequential_ant_colony_optimization(points, num_points, n_iterations);
-  } else if (parallel_or_sequential == '2') {
-    result = parallel2_ant_colony_optimization(points, num_points, n_iterations);
-  } else if (parallel_or_sequential == 'm') {
-    result = manual_batch(points, num_points, n_iterations);
   }
 
-  clock_t end_time = clock();
-  double elapsed_sec = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+  double end_time = omp_get_wtime();
 
   // Print best path
   printf("Best path length: %f\n", result.best_length);
@@ -60,7 +55,7 @@ int main() {
     printf("%d ", result.best_path[i]);
   printf("\n");
 
-  printf("Elapsed time: %.3f seconds\n", elapsed_sec);
+  printf("Elapsed time: %.3f seconds\n", end_time - start_time);
 
   if (visualize == 1) {
     visualize_path(num_points, points, result.best_path);

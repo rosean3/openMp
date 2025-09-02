@@ -25,8 +25,6 @@ ACOResult parallel_ant_colony_optimization(double points[][3], int N_POINTS, int
 
 ACOResult sequential_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER);
 
-ACOResult parallel2_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER);
-
-ACOResult manual_batch(double points[][3], int N_POINTS, int N_ITER);
+#define IDX(i,j,N) ((size_t)(i)*(size_t)(N) + (size_t)(j))
 
 #endif
