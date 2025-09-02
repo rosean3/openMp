@@ -25,4 +25,6 @@ ACOResult parallel_ant_colony_optimization(double points[][3], int N_POINTS, int
 
 ACOResult sequential_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER);
 
+ACOResult parallel2_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER);
+
 #endif

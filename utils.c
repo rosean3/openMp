@@ -280,3 +280,127 @@ ACOResult sequential_ant_colony_optimization(double points[][3], int N_POINTS, i
   ACOResult result = {best_length, best_path};
   return result;
 }
+
+ACOResult parallel2_ant_colony_optimization(double points[][3], int N_POINTS, int N_ITER) {
+  printf("Parallel2 ACO\n");
+  
+  double pheromone[N_POINTS][N_POINTS];
+  for (int i = 0; i < N_POINTS; i++)
+    for (int j = 0; j < N_POINTS; j++)
+      pheromone[i][j] = 1.0;
+
+  double global_best_length = 1e9;
+  int global_best_path[N_POINTS];
+
+  for (int iter = 0; iter < N_ITER; iter++) {
+    int n_threads;
+#pragma omp parallel
+    { n_threads = omp_get_num_threads(); }
+
+    // thread-local pheromone updates
+    double delta_pheromone_private[n_threads][N_POINTS][N_POINTS];
+    for (int t = 0; t < n_threads; t++)
+      for (int i = 0; i < N_POINTS; i++)
+        for (int j = 0; j < N_POINTS; j++)
+          delta_pheromone_private[t][i][j] = 0.0;
+
+    // thread-local bests
+    double local_best_length[n_threads];
+    int local_best_path[n_threads][N_POINTS];
+    for (int t = 0; t < n_threads; t++)
+      local_best_length[t] = 1e9;
+
+// parallel ant loop
+#pragma omp parallel for schedule(dynamic)
+    for (int ant = 0; ant < N_ANTS; ant++) {
+      int tid = omp_get_thread_num();
+      unsigned int seed = (unsigned int)time(NULL) ^ (tid + ant * 31);
+
+      int visited[N_POINTS];
+      for (int v = 0; v < N_POINTS; v++)
+        visited[v] = 0;
+      int path[N_POINTS];
+      int current = 0;
+      path[0] = current;
+      visited[current] = 1;
+      double length = 0.0;
+
+      // Build path
+      for (int step = 1; step < N_POINTS; step++) {
+        int unvisited[N_POINTS];
+        int n_unvisited = 0;
+        for (int k = 0; k < N_POINTS; k++) {
+          if (!visited[k]) {
+            unvisited[n_unvisited++] = k;
+          }
+        }
+
+        double prob[n_unvisited];
+        double sum = 0.0;
+        for (int k = 0; k < n_unvisited; k++) {
+          int next = unvisited[k];
+          double tau = pow(pheromone[current][next], ALPHA);
+          double eta = pow(1.0 / distance(current, next, points), BETA);
+          prob[k] = tau * eta;
+          sum += prob[k];
+        }
+        for (int k = 0; k < n_unvisited; k++)
+          prob[k] /= sum;
+
+        int idx = roulette_wheel(n_unvisited, prob);
+        int next_point = unvisited[idx];
+
+        length += distance(current, next_point, points);
+        current = next_point;
+        path[step] = current;
+        visited[current] = 1;
+      }
+
+      // local best update
+      if (length < local_best_length[tid]) {
+        local_best_length[tid] = length;
+        for (int i = 0; i < N_POINTS; i++)
+          local_best_path[tid][i] = path[i];
+      }
+
+      // update thread-local pheromone
+      for (int i = 0; i < N_POINTS - 1; i++) {
+        delta_pheromone_private[tid][path[i]][path[i + 1]] += Q / length;
+      }
+      delta_pheromone_private[tid][path[N_POINTS - 1]][path[0]] += Q / length;
+    }
+
+    // merge pheromone contributions
+    double delta_pheromone[N_POINTS][N_POINTS];
+    for (int t = 0; t < n_threads; t++) {
+      for (int i = 0; i < N_POINTS; i++) {
+        for (int j = 0; j < N_POINTS; j++) {
+          if (t == 0) { // initialize to 0
+              delta_pheromone[i][j] = 0;
+          }
+          delta_pheromone[i][j] += delta_pheromone_private[t][i][j];
+        }
+      }
+    }
+
+    // evaporate + deposit pheromone
+    for (int i = 0; i < N_POINTS; i++) {
+      for (int j = 0; j < N_POINTS; j++) {
+        pheromone[i][j] *= EVAPORATION_RATE;
+        pheromone[i][j] += delta_pheromone[i][j];
+      }
+    }
+
+    // merge best paths
+    for (int t = 0; t < n_threads; t++) {
+      if (local_best_length[t] < global_best_length) {
+        global_best_length = local_best_length[t];
+        for (int i = 0; i < N_POINTS; i++)
+          global_best_path[i] = local_best_path[t][i];
+      }
+    }
+  }
+
+  ACOResult result = {global_best_length, global_best_path};
+  return result;
+}
